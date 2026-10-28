@@ -2,6 +2,7 @@
 // Usage: npm run smoke (port 9333 unless SMOKE_PORT is set).
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
@@ -13,7 +14,7 @@ const { chromium } = createRequire(import.meta.resolve('@playwright/mcp'))('play
 const PORT = Number(process.env.SMOKE_PORT ?? 9333);
 if (PORT === 9222) throw new Error('Refusing to test on 9222: that is where a real shared Chrome usually runs.');
 const CLI = fileURLToPath(new URL('../cli.js', import.meta.url));
-const work = mkdtempSync('/tmp/shared-chrome-mcp-smoke-');
+const work = mkdtempSync(join(tmpdir(), 'shared-chrome-mcp-smoke-'));
 const profile = join(work, 'profile');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -149,10 +150,19 @@ try {
   await Promise.all(sessions.map(s => s.close().catch(() => {})));
   await observer?.close().catch(() => {});
   const exited = new Promise(resolve => chrome.once('exit', resolve));
-  chrome.kill('SIGTERM');
+  // Killing a Windows process from outside gives it no chance to run its own SIGTERM handler, so
+  // "start" never gets to close the Chrome it launched: taskkill /T stops the whole tree directly.
+  if (process.platform === 'win32') { try { execFileSync('taskkill', ['/PID', String(chrome.pid), '/T', '/F']); } catch {} }
+  else chrome.kill('SIGTERM');
   await Promise.race([exited, sleep(15000)]);
   site.close();
-  rmSync(work, { recursive: true, force: true });
+  // Windows Defender scans a freshly closed Chrome profile for a while; each touch while it's scanning
+  // seems to restart the scan (rmSync's own maxRetries/retryDelay still touches it between tries and
+  // reliably failed here), so this waits it out mostly untouched between tries instead.
+  for (const delay of [0, 5000, 10000, 20000, 30000]) {
+    await sleep(delay);
+    try { rmSync(work, { recursive: true, force: true }); break; } catch (error) { if (delay === 30000) throw error; }
+  }
 }
 
 const failed = results.filter(ok => !ok).length;

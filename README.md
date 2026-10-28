@@ -12,7 +12,7 @@ This is stock [Playwright MCP](https://github.com/microsoft/playwright-mcp) atta
 - **Waits until the page is ready.** After navigate, click, back, select or key press, it waits for load, network idle, no visible spinners and one second without DOM changes (20 s at most), then returns a fresh snapshot. If the page never settles, the result says `NOT READY` plainly instead of handing back a half-loaded page.
 - **Logins stay.** Cookies are shared, so the server refuses obvious logout clicks and URLs. Closing a session closes its windows and nothing else.
 - **Hand a window to the human.** For a step only a person can do (a CAPTCHA, a 2FA code, a final review before submit), `browser_hand_over` brings the current window to the front, puts an optional note in its title and leaves it open after the session ends; the session stops seeing it.
-- **Always on.** On macOS a launchd agent keeps Chrome running across crashes and reboots.
+- **Always on.** On macOS a launchd agent keeps Chrome running across crashes and reboots; on Windows a Scheduled Task does the same.
 
 Alternatives: [agent-browser](https://github.com/vercel-labs/agent-browser) (a driver that pins each session to a tab) and [BrowserOS neo](https://github.com/browseros-ai/BrowserOS) (a separate browser app for agents).
 
@@ -21,12 +21,14 @@ Alternatives: [agent-browser](https://github.com/vercel-labs/agent-browser) (a d
 Needs Node.js 20.11+ and Google Chrome.
 
 ```sh
-npx -y github:zucchini-chat/shared-chrome-mcp install   # macOS: launchd keeps it running
+npx -y github:zucchini-chat/shared-chrome-mcp install   # macOS: launchd, Windows: Scheduled Task — keeps it running
 npx -y github:zucchini-chat/shared-chrome-mcp start     # or run it in the foreground (any OS)
 npx -y github:zucchini-chat/shared-chrome-mcp status
 ```
 
-Chrome opens on its own profile (`~/.shared-chrome-mcp/profile`) with CDP on `127.0.0.1:9222`. Log in there to the sites you want agents to use, or leave that to the agents. Change the port or profile with `--port` / `--profile` (or `SHARED_CHROME_MCP_PORT` / `SHARED_CHROME_MCP_PROFILE`), the same for every command and for the MCP server. `uninstall` removes the launchd agent and keeps the profile. `install` points launchd at the copy of the package it ran from, so run it again after an update.
+Chrome opens on its own profile (`~/.shared-chrome-mcp/profile`) with CDP on `127.0.0.1:9222`. Log in there to the sites you want agents to use, or leave that to the agents. Change the port or profile with `--port` / `--profile` (or `SHARED_CHROME_MCP_PORT` / `SHARED_CHROME_MCP_PROFILE`), the same for every command and for the MCP server. `uninstall` removes the launchd agent or Scheduled Task and keeps the profile. `install` points it at the copy of the package it ran from, so run it again after an update.
+
+On Windows, `install` registers a Scheduled Task, scoped to your own account, that starts at logon and relaunches itself whenever it exits, for any reason; `--owner-chrome-first` is macOS-only (there's no Dock to redirect). Stopping the task or the `start` process from outside (Task Manager, `Stop-ScheduledTask`) can't run its own shutdown code the way a signal does on macOS/Linux, so `uninstall` finds and stops that Chrome directly instead of relying on it to exit cleanly.
 
 On macOS, links from other apps open in the oldest running Chrome. If they start landing in the agents' Chrome, install with `--owner-chrome-first`: it starts your own Chrome first and restarts the agents' one whenever yours restarts.
 
