@@ -20,5 +20,8 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
     "@playwright/mcp": "0.0.83"
+  },
+  "overrides": {
+    "playwright-core": "npm:rebrowser-playwright-core@1.64.101"
   }
 }

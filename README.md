@@ -6,12 +6,13 @@ You log in to a site once, or let the agent do it, and every agent can use that 
 
 ## Why not just Playwright MCP
 
-This is stock [Playwright MCP](https://github.com/microsoft/playwright-mcp) attached to one Chrome over CDP, plus the rules we learned the hard way, enforced by the server so agents don't have to remember them:
+This is [Playwright MCP](https://github.com/microsoft/playwright-mcp) attached to one Chrome over CDP, plus the rules we learned the hard way, enforced by the server so agents don't have to remember them:
 
 - **A window per agent, not a tab.** A background tab reports `document.hidden`, gets throttled, and bot checks flag it. Each MCP session gets its own window on first use and only ever sees its own tabs, so ten agents can work side by side without landing in each other's pages.
 - **Waits until the page is ready.** After navigate, click, back, select or key press, it waits for load, network idle, no visible spinners and one second without DOM changes (20 s at most), then returns a fresh snapshot. If the page never settles, the result says `NOT READY` plainly instead of handing back a half-loaded page.
 - **Logins stay.** Cookies are shared, so the server refuses obvious logout clicks and URLs. Closing a session closes its windows and nothing else.
 - **Hand a window to the human.** For a step only a person can do (a CAPTCHA, a 2FA code, a final review before submit), `browser_hand_over` brings the current window to the front, puts an optional note in its title and leaves it open after the session ends; the session stops seeing it.
+- **Sites don't see the automation.** Stock Playwright sends CDP `Runtime.enable` to every page and iframe, and bot checks detect it (hCaptcha Enterprise on Lever rejects even a human-solved captcha from such a window). This runs on [rebrowser-playwright-core](https://github.com/rebrowser/rebrowser-patches), which doesn't send it; the price is that `browser_console_messages` stays empty.
 - **Always on.** On macOS a launchd agent keeps Chrome running across crashes and reboots; on Windows a Scheduled Task does the same.
 
 Alternatives: [agent-browser](https://github.com/vercel-labs/agent-browser) (a driver that pins each session to a tab) and [BrowserOS neo](https://github.com/browseros-ai/BrowserOS) (a separate browser app for agents).
