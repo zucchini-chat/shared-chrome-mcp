@@ -125,6 +125,8 @@ try {
     !handed.isError && !!handle && !tabsAfter.includes('handover') && tabsAfter.includes('/busy') && !tabsOfB.includes('handover') && handedTitle === 'Solve the captcha - form',
     `${text(handed).slice(0, 150)} | title ${handedTitle} | tabs ${tabsAfter.replace(/\n/g, ' | ').slice(0, 200)}`);
 
+  // A tab Playwright MCP lists but the session's pages do not: take_back must still select the handed-over one.
+  await call(a, 'browser_tabs', { action: 'new', isolatedContext: 'other' });
   // The human types a code and saves; take_back waits for "Saved" and returns the page as they left it.
   let savingAt;
   const typing = sleep(1000).then(() => human.fill('#code', '123456')).then(() => { savingAt = Date.now(); return human.click('button'); });
@@ -132,7 +134,7 @@ try {
   const takenAt = Date.now();
   await typing;
   const inA = text(await call(a, 'browser_evaluate', { function: '() => location.search + " " + code.value + " " + document.title' }));
-  check('take_back waits for the page signal, then the same page is the current tab again, without the note', !taken.isError && takenAt > savingAt && inA.includes('"?handover 123456 form"'),
+  check('take_back waits for the page signal, then the same page is the current tab again, not an isolated-context tab, without the note', !taken.isError && takenAt > savingAt && inA.includes('"?handover 123456 form"'),
     `${text(taken).replace(/\n/g, ' | ').slice(0, 200)} | ${inA.replace(/\n/g, ' | ')}`);
   const unknown = await call(b, 'browser_take_back', { handle: 'NOPE' });
   check('take_back with an unknown handle is refused', unknown.isError && text(unknown).includes('No window with handle'), text(unknown).slice(0, 120));
