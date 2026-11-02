@@ -27,6 +27,7 @@ const PAGES = {
   '/plain': `<title>plain</title><h1>Plain page</h1><a href="/popup-target" target="_blank">Open popup</a>`,
   '/popup-target': `<title>popup</title><h1>Popup page</h1>`,
   '/dialog': `<title>dialog</title><button onclick="alert('hi')">Say hi</button>`,
+  '/form': `<title>form</title><input id="code"><button onclick="document.body.insertAdjacentHTML('beforeend', '<p>Saved</p>')">Save</button>`,
 };
 const site = createServer(async (req, res) => {
   const path = new URL(req.url, 'http://x').pathname;
@@ -114,19 +115,44 @@ try {
   check('logging out is refused', logout.isError && text(logout).includes('Refused'));
 
   await call(a, 'browser_tabs', { action: 'new' });
-  await call(a, 'browser_navigate', { url: `${base}/plain?handover` });
+  await call(a, 'browser_navigate', { url: `${base}/form?handover` });
   const handed = await call(a, 'browser_hand_over', { note: 'Solve the captcha' });
-  const tabsAfter = text(await call(a, 'browser_tabs', { action: 'list' }));
-  const handedTitle = await pageAt(`${base}/plain?handover`)?.title();
-  check('a handed-over window leaves the session, titled with the note', !handed.isError && !tabsAfter.includes('handover') && tabsAfter.includes('/busy') && handedTitle === 'Solve the captcha - plain',
+  const handle = text(handed).match(/with handle (\w+)/)?.[1];
+  const [tabsAfter, tabsOfB] = await Promise.all([a, b].map(async c => text(await call(c, 'browser_tabs', { action: 'list' }))));
+  const human = pageAt(`${base}/form?handover`);
+  const handedTitle = await human?.title();
+  check('a handed-over window leaves the session, titled with the note, and no other session sees it',
+    !handed.isError && !!handle && !tabsAfter.includes('handover') && tabsAfter.includes('/busy') && !tabsOfB.includes('handover') && handedTitle === 'Solve the captcha - form',
     `${text(handed).slice(0, 150)} | title ${handedTitle} | tabs ${tabsAfter.replace(/\n/g, ' | ').slice(0, 200)}`);
 
+  // The human types a code and saves; take_back waits for "Saved" and returns the page as they left it.
+  let savingAt;
+  const typing = sleep(1000).then(() => human.fill('#code', '123456')).then(() => { savingAt = Date.now(); return human.click('button'); });
+  const taken = await call(a, 'browser_take_back', { handle, text: 'Saved' });
+  const takenAt = Date.now();
+  await typing;
+  const inA = text(await call(a, 'browser_evaluate', { function: '() => location.search + " " + code.value + " " + document.title' }));
+  check('take_back waits for the page signal, then the same page is the current tab again, without the note', !taken.isError && takenAt > savingAt && inA.includes('"?handover 123456 form"'),
+    `${text(taken).replace(/\n/g, ' | ').slice(0, 200)} | ${inA.replace(/\n/g, ' | ')}`);
+  const unknown = await call(b, 'browser_take_back', { handle: 'NOPE' });
+  check('take_back with an unknown handle is refused', unknown.isError && text(unknown).includes('No window with handle'), text(unknown).slice(0, 120));
+
+  const handedAgain = await call(a, 'browser_hand_over');
   await a.close();
   for (let i = 0; i < 40 && pageAt(`${base}/busy`); i++) await sleep(250);
   check('closing session A closes its window', !pageAt(`${base}/busy`));
-  check('the handed-over window outlives session A', !!pageAt(`${base}/plain?handover`));
+  check('the handed-over window outlives session A', text(handedAgain).includes(`with handle ${handle}`) && !!pageAt(`${base}/form?handover`));
   const stillB = await call(b, 'browser_evaluate', { function: '() => location.pathname' });
   check('session B is intact after A closed', !stillB.isError && !!pageAt(`${base}/plain`), text(stillB).match(/### Result\n.*/)?.[0].replace('\n', ' '));
+
+  // An agent restarted mid-hand-over: a new session whose first call is take_back.
+  const e = await connect('agent-e');
+  const takenByE = await call(e, 'browser_take_back', { handle });
+  const inE = text(await call(e, 'browser_evaluate', { function: '() => location.search + " " + code.value' }));
+  const tabsE = text(await call(e, 'browser_tabs', { action: 'list' }));
+  check('a new session takes it back by handle after A ended, state intact, no extra window', !takenByE.isError && inE.includes('?handover 123456') && tabsE.match(/^- \d+:/gm)?.length === 1,
+    `${text(takenByE).replace(/\n/g, ' | ').slice(0, 200)} | ${inE.replace(/\n/g, ' | ')} | tabs ${tabsE.replace(/\n/g, ' | ')}`);
+  await e.close();
 
   const closed = await call(b, 'browser_close');
   const reopened = await call(b, 'browser_navigate', { url: `${base}/plain?reopened` });
